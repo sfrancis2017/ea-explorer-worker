@@ -44,8 +44,16 @@ Rules:
 - Alternate 2: propose a cost-optimised or best-of-breed variant with different trade-offs.
 - If a layer has no selection, pick the most appropriate vendor for the industry.
 - Node IDs: short unique strings (e.g. "n1", "n2").
-- Edges: 5-8 max showing key data/integration flows. Use concise pattern labels: "API/REST", "OData", "Kafka stream", "ETL/ELT", "SFTP batch", "FHIR R4", "OPC-UA", "PI connector".
+- Edges: 6-10 showing key data/integration flows. Use concise pattern labels: "API/REST", "OData", "Kafka stream", "ETL/ELT", "SFTP batch", "FHIR R4", "OPC-UA", "PI connector".
 - Each edge includes a 1-sentence description of what data/control flows over that integration.
+- The "layer" field on each node MUST be exactly one of these lowercase strings: "source", "ot", "erp", "middleware", "data", "bi", "ai". Do not invent variants like "Source" or "data_platform" — use the exact tokens.
+- Every node referenced by an edge (in "from" or "to") MUST exist in the "nodes" array with a vendor name. Do not emit edges that reference undefined node ids.
+- CONNECTIVITY: every node MUST be connected to the architecture by at least one edge (no isolated nodes/islands). Every layer that contains nodes MUST have at least one inbound or outbound edge connecting it to another layer. Specifically:
+  * Reporting & BI ("bi") nodes MUST have at least one inbound edge from "data" or "erp".
+  * AI ("ai") nodes MUST have at least one inbound edge from "data", "middleware", or "erp".
+  * Data ("data") nodes MUST have at least one inbound edge from "erp", "middleware", "source", or "ot".
+  * Middleware ("middleware") nodes MUST connect at least one of {source, ot, erp} to at least one of {data, ai}.
+  Verify these constraints before emitting the JSON. The diagram should read as a coherent end-to-end flow from operational systems through to analytics and AI, not as disconnected lanes.
 - Executive summary: 4-5 sentences in a business-leadership tone, no buzzword stuffing.
 - Roadmap: 3 phases (Foundation, Integration, Activation), each with duration and 3-4 implementation items.
 
