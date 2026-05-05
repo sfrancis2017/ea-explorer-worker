@@ -1,0 +1,19 @@
+name = "ea-explorer-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# Rate-limit storage (per-IP daily + per-minute counters)
+# Run: wrangler kv namespace create RATE_LIMIT_KV
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "44fa493e9ba1453db30b3e9fc570bef1"
+
+[vars]
+# Public, non-sensitive config goes here.
+# ANTHROPIC_API_KEY is a secret — set via:
+#   wrangler secret put ANTHROPIC_API_KEY
+ALLOWED_ORIGINS = "https://sajivfrancis.com,https://www.sajivfrancis.com,http://localhost:4321,http://localhost:4322"
+RATE_LIMIT_PER_DAY = "3"
+RATE_LIMIT_PER_MINUTE = "1"
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
