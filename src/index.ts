@@ -18,6 +18,8 @@ interface Env {
 interface GenerateRequest {
   industryLabel: string;
   selections: Record<string, { name: string; layerLabel: string }[]>;
+  sic?: string[]; // representative SEC SIC codes for the industry (grounding)
+  representativeFilers?: string[]; // representative public filers (grounding)
 }
 
 const SYSTEM_PROMPT = `You are a senior enterprise architect with deep expertise across all major industries and technology stacks. You provide concise, practical, and insightful enterprise architecture recommendations grounded in real integration patterns. You always respond with pure valid JSON only — no markdown, no code fences, no preamble, no trailing text. Just the JSON object.`;
@@ -31,14 +33,23 @@ function buildPrompt(body: GenerateRequest): string {
     })
     .join('\n');
 
-  return `Industry: ${body.industryLabel}
+  const sic = (body.sic ?? []).filter(Boolean);
+  const filers = (body.representativeFilers ?? []).filter(Boolean);
+  const grounding =
+    (sic.length ? `Representative SEC SIC codes: ${sic.join(', ')}.\n` : '') +
+    (filers.length
+      ? `Representative public filers (SEC-classified in this industry): ${filers.join(', ')}.\n`
+      : '');
 
+  return `Industry: ${body.industryLabel}
+${grounding ? '\n' + grounding : ''}
 User's Selected Vendors by Architecture Layer:
 ${layerSummary}
 
 Generate 3 enterprise reference architectures (1 primary + 2 alternates) for this ${body.industryLabel} organization.
 
 Rules:
+- GROUNDING: target a large public filer in this industry${filers.length ? ` (companies like ${filers.slice(0, 4).join(', ')})` : ''}${sic.length ? `, SIC ${sic.slice(0, 4).join('/')}` : ''}. Reflect that organisation's scale, regulatory/compliance drivers, and the integration patterns those specific systems use in production — not a generic stack.
 - Primary: use user's selections as the base, recommend optimal integration patterns between them.
 - Alternate 1: propose a cloud-native / SaaS-optimised variant (different middleware or data platform).
 - Alternate 2: propose a cost-optimised or best-of-breed variant with different trade-offs.
@@ -154,7 +165,19 @@ function validateRequest(body: unknown): GenerateRequest | { error: string } {
   const json = JSON.stringify(b);
   if (json.length > 10_000) return { error: 'Request payload too large' };
 
-  return b as unknown as GenerateRequest;
+  // Sanitize optional grounding fields (string arrays only; bounded; no newlines).
+  const cleanStrings = (arr: unknown): string[] | undefined =>
+    Array.isArray(arr)
+      ? arr
+          .filter((x): x is string => typeof x === 'string')
+          .slice(0, 15)
+          .map((s) => s.replace(/[\r\n]+/g, ' ').slice(0, 60))
+      : undefined;
+
+  const result = b as unknown as GenerateRequest;
+  result.sic = cleanStrings(b.sic);
+  result.representativeFilers = cleanStrings(b.representativeFilers);
+  return result;
 }
 
 async function callAnthropic(prompt: string, env: Env): Promise<string> {
