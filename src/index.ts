@@ -209,6 +209,39 @@ function parseArchResponse(text: string): unknown {
   return JSON.parse(cleaned);
 }
 
+const MERMAID_SYSTEM = `You convert a diagram image into Mermaid.js source code. Study the shapes, connectors, arrows, swimlanes/groups, and every text label, and reproduce the structure as faithfully as possible. Choose the most appropriate Mermaid diagram type (flowchart, sequenceDiagram, erDiagram, classDiagram, stateDiagram-v2, etc.). Preserve label wording. Output ONLY raw, valid Mermaid code — no markdown fences, no commentary, no explanation.`;
+
+async function imageToMermaid(imageB64: string, mediaType: string, env: Env): Promise<string> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: env.ANTHROPIC_MODEL,
+      max_tokens: 2000,
+      system: MERMAID_SYSTEM,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageB64 } },
+            { type: 'text', text: 'Convert this diagram into Mermaid. Output only the Mermaid code.' },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Anthropic ${res.status}: ${t.slice(0, 300)}`);
+  }
+  const data = (await res.json()) as { content?: { text?: string }[] };
+  return (data?.content?.[0]?.text ?? '').replace(/```mermaid|```/g, '').trim();
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const origin = request.headers.get('Origin');
@@ -221,6 +254,27 @@ export default {
 
     if (url.pathname === '/health') {
       return jsonResponse({ ok: true, model: env.ANTHROPIC_MODEL }, 200, cors);
+    }
+
+    if (url.pathname === '/image-to-mermaid') {
+      if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405, cors);
+      let body: { image?: unknown; mediaType?: unknown };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return jsonResponse({ error: 'Invalid JSON' }, 400, cors);
+      }
+      const img = typeof body.image === 'string' ? body.image : '';
+      const mt = typeof body.mediaType === 'string' ? body.mediaType : 'image/png';
+      if (!img) return jsonResponse({ error: 'image (base64) required' }, 400, cors);
+      if (img.length > 8_000_000) return jsonResponse({ error: 'Image too large (max ~6 MB)' }, 413, cors);
+      if (!/^image\/(png|jpe?g|webp|gif)$/.test(mt)) return jsonResponse({ error: 'Unsupported image type' }, 400, cors);
+      try {
+        const mermaid = await imageToMermaid(img, mt, env);
+        return jsonResponse({ mermaid }, 200, cors);
+      } catch (e) {
+        return jsonResponse({ error: e instanceof Error ? e.message : 'failed' }, 502, cors);
+      }
     }
 
     if (url.pathname !== '/generate') {
