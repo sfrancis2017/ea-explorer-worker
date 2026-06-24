@@ -13,6 +13,24 @@ interface Env {
   ALLOWED_ORIGINS: string;
   RATE_LIMIT_PER_DAY: string;
   RATE_LIMIT_PER_MINUTE: string;
+  // Owner bearer (= TOOLS_TOKEN). When a request carries it, the per-IP rate
+  // limit is skipped so the owner is never throttled on their own tools.
+  // Set via: npx wrangler secret put TOOLS_TOKEN
+  TOOLS_TOKEN?: string;
+}
+
+// Constant-time compare so a valid owner token bypasses the rate limit without
+// leaking timing. Returns false unless TOOLS_TOKEN is configured and matches.
+function isOwnerRequest(request: Request, env: Env): boolean {
+  if (!env.TOOLS_TOKEN) return false;
+  const m = (request.headers.get('Authorization') ?? '').match(/^Bearer\s+(.+)$/);
+  if (!m) return false;
+  const a = new TextEncoder().encode(m[1]);
+  const b = new TextEncoder().encode(env.TOOLS_TOKEN);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
 }
 
 interface GenerateRequest {
@@ -102,7 +120,7 @@ function corsHeaders(origin: string | null, env: Env): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
@@ -259,21 +277,24 @@ export default {
     if (url.pathname === '/image-to-mermaid') {
       if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405, cors);
       // Public + paid (Claude Vision). Rate-limit per IP exactly like /generate
-      // so it can't be driven to amplify cost. Shares the same per-IP budget.
-      const ipImg = request.headers.get('CF-Connecting-IP') ?? 'localhost';
-      const limImg = await checkAndIncrementRateLimit(ipImg, env);
-      if (!limImg.ok) {
-        return jsonResponse(
-          {
-            error:
-              limImg.reason === 'minute'
-                ? 'Rate limit: 1 request per minute per IP. Wait a moment and try again.'
-                : `Daily limit reached (${env.RATE_LIMIT_PER_DAY} per day per IP). Try again tomorrow.`,
-            retryAfter: limImg.retryAfter,
-          },
-          429,
-          cors,
-        );
+      // so it can't be driven to amplify cost — but the OWNER (valid token)
+      // bypasses the limit so they're never throttled on their own tools.
+      if (!isOwnerRequest(request, env)) {
+        const ipImg = request.headers.get('CF-Connecting-IP') ?? 'localhost';
+        const limImg = await checkAndIncrementRateLimit(ipImg, env);
+        if (!limImg.ok) {
+          return jsonResponse(
+            {
+              error:
+                limImg.reason === 'minute'
+                  ? 'Rate limit: 1 request per minute per IP. Wait a moment and try again.'
+                  : `Daily limit reached (${env.RATE_LIMIT_PER_DAY} per day per IP). Try again tomorrow.`,
+              retryAfter: limImg.retryAfter,
+            },
+            429,
+            cors,
+          );
+        }
       }
       let body: { image?: unknown; mediaType?: unknown };
       try {
@@ -302,21 +323,24 @@ export default {
       return jsonResponse({ error: 'Method not allowed' }, 405, cors);
     }
 
-    // Rate limit per IP (CF-Connecting-IP set by Cloudflare; localhost in dev)
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'localhost';
-    const limit = await checkAndIncrementRateLimit(ip, env);
-    if (!limit.ok) {
-      return jsonResponse(
-        {
-          error:
-            limit.reason === 'minute'
-              ? 'Rate limit: 1 generation per minute per IP. Wait a moment and try again.'
-              : `Daily limit reached (${env.RATE_LIMIT_PER_DAY} per day per IP). Try again tomorrow.`,
-          retryAfter: limit.retryAfter,
-        },
-        429,
-        { ...cors, 'Retry-After': String(limit.retryAfter) },
-      );
+    // Rate limit per IP (CF-Connecting-IP set by Cloudflare; localhost in dev).
+    // The owner (valid token) bypasses it so they're never throttled.
+    if (!isOwnerRequest(request, env)) {
+      const ip = request.headers.get('CF-Connecting-IP') ?? 'localhost';
+      const limit = await checkAndIncrementRateLimit(ip, env);
+      if (!limit.ok) {
+        return jsonResponse(
+          {
+            error:
+              limit.reason === 'minute'
+                ? 'Rate limit: 1 generation per minute per IP. Wait a moment and try again.'
+                : `Daily limit reached (${env.RATE_LIMIT_PER_DAY} per day per IP). Try again tomorrow.`,
+            retryAfter: limit.retryAfter,
+          },
+          429,
+          { ...cors, 'Retry-After': String(limit.retryAfter) },
+        );
+      }
     }
 
     let body: unknown;
