@@ -258,6 +258,23 @@ export default {
 
     if (url.pathname === '/image-to-mermaid') {
       if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405, cors);
+      // Public + paid (Claude Vision). Rate-limit per IP exactly like /generate
+      // so it can't be driven to amplify cost. Shares the same per-IP budget.
+      const ipImg = request.headers.get('CF-Connecting-IP') ?? 'localhost';
+      const limImg = await checkAndIncrementRateLimit(ipImg, env);
+      if (!limImg.ok) {
+        return jsonResponse(
+          {
+            error:
+              limImg.reason === 'minute'
+                ? 'Rate limit: 1 request per minute per IP. Wait a moment and try again.'
+                : `Daily limit reached (${env.RATE_LIMIT_PER_DAY} per day per IP). Try again tomorrow.`,
+            retryAfter: limImg.retryAfter,
+          },
+          429,
+          cors,
+        );
+      }
       let body: { image?: unknown; mediaType?: unknown };
       try {
         body = (await request.json()) as typeof body;
