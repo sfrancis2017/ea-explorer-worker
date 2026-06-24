@@ -230,7 +230,7 @@ function parseArchResponse(text: string): unknown {
 const MERMAID_SYSTEM = `You convert a diagram image into Mermaid.js source code. Study the shapes, connectors, arrows, swimlanes/groups, and every text label, and reproduce the structure as faithfully as possible. Choose the most appropriate Mermaid diagram type (flowchart, sequenceDiagram, erDiagram, classDiagram, stateDiagram-v2, etc.). Preserve label wording.
 
 When the diagram is a flowchart/graph (boxes-and-arrows, architecture, network, or process diagrams), preserve its VISUAL STRUCTURE so downstream tools can rebuild lanes and colours:
-- Every visual group, boundary box, swimlane, or container region in the image MUST become a Mermaid \`subgraph "<Group Title>" ... end\` block, with the nodes that sit inside it nested inside that subgraph. Nest subgraphs when the image shows a box within a box.
+- Every visual group, boundary box, swimlane, or container region in the image MUST become a Mermaid \`subgraph groupId["Group Title"] ... end\` block (a short alphanumeric id + a bracketed, quoted title), with the nodes nested inside it. Nest subgraphs when a box sits inside another box. Node IDs must be short and alphanumeric/underscore only (no spaces or punctuation) — put the human label in a quoted bracket, e.g. \`vm1["Virtual machine (NSG)"]\`; always quote label text so parentheses/slashes/ampersands can't break the parser.
 - Reproduce node FILL and BORDER colours with \`classDef\` + \`class\` (or \`:::\`). Define one \`classDef <name> fill:#RRGGBB,stroke:#RRGGBB,color:#RRGGBB;\` per distinct colour you see, and assign each node its class. Approximate the hex colours from the image.
 - Keep edge direction and any edge labels.
 
